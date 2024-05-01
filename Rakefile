@@ -2,6 +2,7 @@
 
 require "bundler/gem_tasks"
 require "minitest/test_task"
+require 'minitest/pride'
 
 Minitest::TestTask.create
 
