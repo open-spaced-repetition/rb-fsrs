@@ -1,4 +1,8 @@
+# frozen_string_literal: true
+
 module Fsrs
+  #
+  ## Scheduling Info
   class SchedulingInfo
     attr_accessor :card, :review_log
 
@@ -8,6 +12,8 @@ module Fsrs
     end
   end
 
+  #
+  ## Review Log
   class ReviewLog
     attr_accessor :rating, :scheduled_days, :elapsed_days, :review, :state
 
@@ -20,7 +26,9 @@ module Fsrs
     end
   end
 
-  class SchedulingCards
+  #
+  ## Determines next review date
+  class CardScheduler
     attr_accessor :again, :hard, :good, :easy
 
     def initialize(card)
@@ -31,93 +39,132 @@ module Fsrs
     end
 
     def update_state(state)
-      if state == State::NEW
-        @again.state = State::LEARNING
-        @hard.state = State::LEARNING
-        @good.state = State::LEARNING
-        @easy.state = State::REVIEW
-      elsif [State::LEARNING, State::RELEARNING].include?(state)
-        @again.state = state
-        @hard.state = state
-        @good.state = State::REVIEW
-        @easy.state = State::REVIEW
-      elsif state == State::REVIEW
-        @again.state = State::RELEARNING
-        @hard.state = State::REVIEW
-        @good.state = State::REVIEW
-        @easy.state = State::REVIEW
-        @again.lapses += 1
+      case state
+      when State::NEW
+        update_new_state
+      when State::LEARNING, State::RELEARNING
+        update_learning_relearning_state(state)
+      when State::REVIEW
+        update_review_state
       end
     end
 
     def schedule(now, hard_interval, good_interval, easy_interval)
-      @again.scheduled_days = 0
-      @hard.scheduled_days = hard_interval
-      @good.scheduled_days = good_interval
-      @easy.scheduled_days = easy_interval
-      @again.due = now + 5.minutes
-      @hard.due = if hard_interval > 0
-                    now + hard_interval.days
-                  else
-                    now + 10.minutes
-                  end
-      @good.due = now + good_interval.days
-      @easy.due = now + easy_interval.days
+      update_schedule_days(hard_interval, good_interval, easy_interval)
+      update_due_dates(now, hard_interval, good_interval, easy_interval)
     end
 
     def record_log(card, now)
       {
-        Rating::AGAIN => SchedulingInfo.new(
-          @again,
-          ReviewLog.new(
-            Rating::AGAIN,
-            @again.scheduled_days,
-            card.elapsed_days,
-            now,
-            card.state
-          )
-        ),
-        Rating::HARD => SchedulingInfo.new(
-          @hard,
-          ReviewLog.new(
-            Rating::HARD,
-            @hard.scheduled_days,
-            card.elapsed_days,
-            now,
-            card.state
-          )
-        ),
-        Rating::GOOD => SchedulingInfo.new(
-          @good,
-          ReviewLog.new(
-            Rating::GOOD,
-            @good.scheduled_days,
-            card.elapsed_days,
-            now,
-            card.state
-          )
-        ),
-        Rating::EASY => SchedulingInfo.new(
-          @easy,
-          ReviewLog.new(
-            Rating::EASY,
-            @easy.scheduled_days,
-            card.elapsed_days,
-            now,
-            card.state
-          )
-        )
+        Rating::AGAIN => record_again_log(card, now),
+        Rating::HARD => record_hard_log(card, now),
+        Rating::GOOD => record_good_log(card, now),
+        Rating::EASY => record_easy_log(card, now)
       }
+    end
+
+    private
+
+    def update_due_dates(now, hard_interval, good_interval, easy_interval)
+      @again.due = now + 5.minutes
+      @hard.due = hard_interval.positive? ? now + hard_interval.days : now + 10.minutes
+      @good.due = now + good_interval.days
+      @easy.due = now + easy_interval.days
+    end
+
+    def update_schedule_days(hard_interval, good_interval, easy_interval)
+      @again.scheduled_days = 0
+      @hard.scheduled_days = hard_interval
+      @good.scheduled_days = good_interval
+      @easy.scheduled_days = easy_interval
+    end
+
+    def update_new_state
+      @again.state = State::LEARNING
+      @hard.state = State::LEARNING
+      @good.state = State::LEARNING
+      @easy.state = State::REVIEW
+    end
+
+    def update_learning_relearning_state(state)
+      @again.state = state
+      @hard.state = state
+      @good.state = State::REVIEW
+      @easy.state = State::REVIEW
+    end
+
+    def update_review_state
+      @again.state = State::RELEARNING
+      @hard.state = State::REVIEW
+      @good.state = State::REVIEW
+      @easy.state = State::REVIEW
+      @again.lapses += 1
+    end
+
+    def record_again_log(card, now)
+      SchedulingInfo.new(
+        @again,
+        ReviewLog.new(
+          Rating::AGAIN,
+          @again.scheduled_days,
+          card.elapsed_days,
+          now,
+          card.state
+        )
+      )
+    end
+
+    def record_hard_log(card, now)
+      SchedulingInfo.new(
+        @hard,
+        ReviewLog.new(
+          Rating::HARD,
+          @hard.scheduled_days,
+          card.elapsed_days,
+          now,
+          card.state
+        )
+      )
+    end
+
+    def record_good_log(card, now)
+      SchedulingInfo.new(
+        @good,
+        ReviewLog.new(
+          Rating::GOOD,
+          @good.scheduled_days,
+          card.elapsed_days,
+          now,
+          card.state
+        )
+      )
+    end
+
+    def record_easy_log(card, now)
+      SchedulingInfo.new(
+        @easy,
+        ReviewLog.new(
+          Rating::EASY,
+          @easy.scheduled_days,
+          card.elapsed_days,
+          now,
+          card.state
+        )
+      )
     end
   end
 
-  module Rating
+  #
+  ## Rating
+  class Rating
     AGAIN = 1
     HARD = 2
     GOOD = 3
     EASY = 4
   end
 
+  #
+  ## Card
   class Card
     attr_accessor :due, :stability, :difficulty, :elapsed_days, :scheduled_days, :reps, :lapses, :state, :last_review
 
@@ -134,12 +181,12 @@ module Fsrs
 
     def get_retrievability(now)
       decay = -0.5
-      factor = 0.9**(1 / decay) - 1
+      factor = (0.9**(1 / decay)) - 1
 
       return nil unless @state == State::REVIEW
 
       elapsed_days = [0, (now - @last_review).to_i].max
-      (1 + factor * elapsed_days / @stability)**decay
+      (1 + (factor * elapsed_days / @stability))**decay
     end
 
     def deep_clone
@@ -147,6 +194,8 @@ module Fsrs
     end
   end
 
+  #
+  ## State
   class State
     NEW = 0
     LEARNING = 1
@@ -154,13 +203,15 @@ module Fsrs
     RELEARNING = 3
   end
 
+  #
+  ## Scheduler
   class Scheduler
     attr_accessor :p, :decay, :factor
 
     def initialize
       @p = Parameters.new
       @decay = -0.5
-      @factor = 0.9**(1 / @decay) - 1
+      @factor = (0.9**(1 / @decay)) - 1
     end
 
     def repeat(card, now)
@@ -174,36 +225,49 @@ module Fsrs
                           end
       card.last_review = now
       card.reps += 1
-      s = SchedulingCards.new(card)
-      s.update_state(card.state)
+      card_scheduler = CardScheduler.new(card)
+      card_scheduler.update_state(card.state)
 
-      if card.state == State::NEW
-        init_ds(s)
-        s.again.due = now + 60
-        s.hard.due = now + 5 * 60
-        s.good.due = now + 10 * 60
-        easy_interval = next_interval(s.easy.stability)
-        s.easy.scheduled_days = easy_interval
-        s.easy.due = now + easy_interval.days
-      elsif card.state == State::LEARNING || card.state == State::RELEARNING
-        hard_interval = 0
-        good_interval = next_interval(s.good.stability)
-        easy_interval = [next_interval(s.easy.stability), good_interval + 1].max
-        s.schedule(now, hard_interval, good_interval, easy_interval)
-      elsif card.state == State::REVIEW
-        interval = card.elapsed_days
-        last_d = card.difficulty
-        last_s = card.stability
-        retrievability = forgetting_curve(interval, last_s)
-        next_ds(s, last_d, last_s, retrievability)
-        hard_interval = next_interval(s.hard.stability)
-        good_interval = next_interval(s.good.stability)
-        hard_interval = [hard_interval, good_interval].min
-        good_interval = [good_interval, hard_interval + 1].max
-        easy_interval = [next_interval(s.easy.stability), good_interval + 1].max
-        s.schedule(now, hard_interval, good_interval, easy_interval)
+      case card.state
+      when State::NEW
+        schedule_new_state(card_scheduler, now)
+      when State::LEARNING, State::RELEARNING
+        schedule_learning_relearning_state(card_scheduler, now)
+      when State::REVIEW
+        schedule_review_state(card_scheduler, card, now)
       end
-      s.record_log(card, now)
+      card_scheduler.record_log(card, now)
+    end
+
+    def schedule_new_state(s, now)
+      init_ds(s)
+      s.again.due = now + 60
+      s.hard.due = now + (5 * 60)
+      s.good.due = now + (10 * 60)
+      easy_interval = next_interval(s.easy.stability)
+      s.easy.scheduled_days = easy_interval
+      s.easy.due = now + easy_interval.days
+    end
+
+    def schedule_learning_relearning_state(s, now)
+      hard_interval = 0
+      good_interval = next_interval(s.good.stability)
+      easy_interval = [next_interval(s.easy.stability), good_interval + 1].max
+      s.schedule(now, hard_interval, good_interval, easy_interval)
+    end
+
+    def schedule_review_state(s, card, now)
+      interval = card.elapsed_days
+      last_d = card.difficulty
+      last_s = card.stability
+      retrievability = forgetting_curve(interval, last_s)
+      next_ds(s, last_d, last_s, retrievability)
+      hard_interval = next_interval(s.hard.stability)
+      good_interval = next_interval(s.good.stability)
+      hard_interval = [hard_interval, good_interval].min
+      good_interval = [good_interval, hard_interval + 1].max
+      easy_interval = [next_interval(s.easy.stability), good_interval + 1].max
+      s.schedule(now, hard_interval, good_interval, easy_interval)
     end
 
     def init_ds(s)
@@ -233,38 +297,40 @@ module Fsrs
     end
 
     def init_difficulty(r)
-      [[self.p.w[4] - self.p.w[5] * (r - 3), 1].max, 10].min
+      [[self.p.w[4] - (self.p.w[5] * (r - 3)), 1].max, 10].min
     end
 
     def forgetting_curve(elapsed_days, stability)
-      (1 + factor * elapsed_days / stability)**decay
+      (1 + (factor * elapsed_days / stability))**decay
     end
 
     def next_interval(s)
-      new_interval = s / factor * (self.p.request_retention**(1 / decay) - 1)
+      new_interval = s / factor * ((self.p.request_retention**(1 / decay)) - 1)
       new_interval.round.clamp(1, self.p.maximum_interval)
     end
 
     def next_difficulty(d, r)
-      next_d = d - self.p.w[6] * (r - 3)
+      next_d = d - (self.p.w[6] * (r - 3))
       mean_reversion(self.p.w[4], next_d).clamp(1, 10)
     end
 
     def mean_reversion(init, current)
-      self.p.w[7] * init + (1 - self.p.w[7]) * current
+      (self.p.w[7] * init) + ((1 - self.p.w[7]) * current)
     end
 
     def next_recall_stability(d, s, r, rating)
       hard_penalty = rating == Rating::HARD ? self.p.w[15] : 1
       easy_bonus = rating == Rating::EASY ? self.p.w[16] : 1
-      s * (1 + Math.exp(self.p.w[8]) * (11 - d) * (s**-self.p.w[9]) * (Math.exp((1 - r) * self.p.w[10]) - 1) * hard_penalty * easy_bonus)
+      s * (1 + (Math.exp(self.p.w[8]) * (11 - d) * (s**-self.p.w[9]) * (Math.exp((1 - r) * self.p.w[10]) - 1) * hard_penalty * easy_bonus))
     end
 
     def next_forget_stability(d, s, r)
-      self.p.w[11] * (d**-self.p.w[12]) * ((s + 1)**self.p.w[13] - 1) * Math.exp((1 - r) * self.p.w[14])
+      self.p.w[11] * (d**-self.p.w[12]) * (((s + 1)**self.p.w[13]) - 1) * Math.exp((1 - r) * self.p.w[14])
     end
   end
 
+  #
+  ## Parameters
   class Parameters
     attr_accessor :request_retention, :maximum_interval, :w
 

@@ -7,9 +7,12 @@ require "minitest/autorun"
 require "minitest/pride"
 
 def print_scheduling_cards(scheduling_cards)
+  # Useful for debugging
+  #
   %i[again hard good easy].each do |state|
-    puts "#{state}.card: #{scheduling_cards.dig(Fsrs::Rating.const_get(state.upcase.to_sym)).card.scheduled_days}"
-    # puts "#{state}.review_log: #{scheduling_cards.dig(Fsrs::Rating.const_get(state.upcase.to_sym)).review_log.inspect}"  
+    puts scheduling_cards[Fsrs::Rating.const_get(state.upcase.to_sym)]
+      .card.inspect
+    puts scheduling_cards[Fsrs::Rating.const_get(state.upcase.to_sym)]
+      .review_log.inspect
   end
-  puts '--------------------------'
 end

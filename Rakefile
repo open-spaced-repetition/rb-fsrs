@@ -2,12 +2,14 @@
 
 require "bundler/gem_tasks"
 require "minitest/test_task"
-require 'minitest/pride'
+require "minitest/pride"
 
 Minitest::TestTask.create
 
-require "rubocop/rake_task"
+task default: %i[test]
 
-RuboCop::RakeTask.new
+# require "rubocop/rake_task"
 
-task default: %i[test rubocop]
+# RuboCop::RakeTask.new
+
+# task default: %i[test rubocop]

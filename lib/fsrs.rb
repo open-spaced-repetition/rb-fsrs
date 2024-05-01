@@ -11,6 +11,8 @@ require_relative "fsrs/fsrs"
 module Fsrs
   class Error < StandardError; end
 
+  #
+  ## An error for invalidate dates
   class InvalidDateError < Error
     def initialize(msg = "Date must be UTC and timezone-aware")
       super
