@@ -1,3 +1,5 @@
+[![Ruby](https://github.com/clayton/rb-fsrs/actions/workflows/main.yml/badge.svg)](https://github.com/clayton/rb-fsrs/actions/workflows/main.yml)
+[![Gem Version](https://badge.fury.io/rb/fsrs.svg)](https://badge.fury.io/rb/fsrs)
 ## About The Project
 
 rb-fsrs is a Ruby Gem implements [Free Spaced Repetition Scheduler algorithm](https://github.com/open-spaced-repetition/free-spaced-repetition-scheduler). It helps developers apply FSRS in their flashcard apps.
