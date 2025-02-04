@@ -53,7 +53,7 @@
       onCreate = {
         # Example: install JS dependencies from NPM
         # npm-install = "npm install";
-        "setup" = "bundle install";
+        "setup" = "bin/setup";
       };
       # Runs when the workspace is (re)started
       onStart = {
