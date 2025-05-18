@@ -241,9 +241,9 @@ module Fsrs
 
     def schedule_new_state(s, now)
       init_ds(s)
-      s.again.due = now + 60
-      s.hard.due = now + (5 * 60)
-      s.good.due = now + (10 * 60)
+      s.again.due = now + 60.seconds
+      s.hard.due = now + (5 * 60).seconds
+      s.good.due = now + (10 * 60).seconds
       easy_interval = next_interval(s.easy.stability)
       s.easy.scheduled_days = easy_interval
       s.easy.due = now + easy_interval.days
