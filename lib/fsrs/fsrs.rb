@@ -218,16 +218,21 @@ module Fsrs
       raise Fsrs::InvalidDateError unless now.utc?
 
       card = card.clone
-      card.elapsed_days = if card.state == State::NEW
-                            0
-                          else
-                            (now - card.last_review).to_i
-                          end
+      card.elapsed_days = card_elapsed_days(card, now)
       card.last_review = now
       card.reps += 1
       card_scheduler = CardScheduler.new(card)
       card_scheduler.update_state(card.state)
 
+      schedule_card(card_scheduler, card, now)
+      card_scheduler.record_log(card, now)
+    end
+
+    def card_elapsed_days(card, now)
+      card.state == State::NEW ? 0 : (now - card.last_review).to_i
+    end
+
+    def schedule_card(card_scheduler, card, now)
       case card.state
       when State::NEW
         schedule_new_state(card_scheduler, now)
@@ -236,7 +241,6 @@ module Fsrs
       when State::REVIEW
         schedule_review_state(card_scheduler, card, now)
       end
-      card_scheduler.record_log(card, now)
     end
 
     def schedule_new_state(s, now)
@@ -262,11 +266,16 @@ module Fsrs
       last_s = card.stability
       retrievability = forgetting_curve(interval, last_s)
       next_ds(s, last_d, last_s, retrievability)
+      compute_review_state_intervals_and_schedule(s, now)
+    end
+
+    def compute_review_state_intervals_and_schedule(s, now)
       hard_interval = next_interval(s.hard.stability)
       good_interval = next_interval(s.good.stability)
       hard_interval = [hard_interval, good_interval].min
       good_interval = [good_interval, hard_interval + 1].max
       easy_interval = [next_interval(s.easy.stability), good_interval + 1].max
+
       s.schedule(now, hard_interval, good_interval, easy_interval)
     end
 
@@ -297,7 +306,7 @@ module Fsrs
     end
 
     def init_difficulty(r)
-      [[self.p.w[4] - (self.p.w[5] * (r - 3)), 1].max, 10].min
+      (self.p.w[4] - (self.p.w[5] * (r - 3))).clamp(1, 10)
     end
 
     def forgetting_curve(elapsed_days, stability)
@@ -321,11 +330,13 @@ module Fsrs
     def next_recall_stability(d, s, r, rating)
       hard_penalty = rating == Rating::HARD ? self.p.w[15] : 1
       easy_bonus = rating == Rating::EASY ? self.p.w[16] : 1
-      s * (1 + (Math.exp(self.p.w[8]) * (11 - d) * (s**-self.p.w[9]) * (Math.exp((1 - r) * self.p.w[10]) - 1) * hard_penalty * easy_bonus))
+      s * (1 + (Math.exp(self.p.w[8]) * (11 - d) * (s**-self.p.w[9]) *
+          (Math.exp((1 - r) * self.p.w[10]) - 1) * hard_penalty * easy_bonus))
     end
 
     def next_forget_stability(d, s, r)
-      self.p.w[11] * (d**-self.p.w[12]) * (((s + 1)**self.p.w[13]) - 1) * Math.exp((1 - r) * self.p.w[14])
+      self.p.w[11] * (d**-self.p.w[12]) * (((s + 1)**self.p.w[13]) - 1) *
+        Math.exp((1 - r) * self.p.w[14])
     end
   end
 
@@ -337,25 +348,8 @@ module Fsrs
     def initialize
       @request_retention = 0.9
       @maximum_interval = 36_500
-      @w = [
-        0.4,
-        0.6,
-        2.4,
-        5.8,
-        4.93,
-        0.94,
-        0.86,
-        0.01,
-        1.49,
-        0.14,
-        0.94,
-        2.18,
-        0.05,
-        0.34,
-        1.26,
-        0.29,
-        2.61
-      ]
+      @w = [0.4, 0.6, 2.4, 5.8, 4.93, 0.94, 0.86, 0.01, 1.49, 0.14, 0.94,
+            2.18, 0.05, 0.34, 1.26, 0.29, 2.61]
     end
   end
 end

@@ -1,3 +1,5 @@
+inherit_from: .rubocop_todo.yml
+
 AllCops:
   TargetRubyVersion: 3.0
   NewCops: enable
@@ -8,3 +10,10 @@ Style/StringLiterals:
 
 Style/StringLiteralsInInterpolation:
   EnforcedStyle: double_quotes
+
+Naming/MethodParameterName:
+  AllowedNames: s, r, d
+
+Metrics/MethodLength:
+  Exclude:
+    - 'test/test_fsrs.rb'
