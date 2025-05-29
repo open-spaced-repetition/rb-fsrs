@@ -16,4 +16,4 @@ Naming/MethodParameterName:
 
 Metrics/MethodLength:
   Exclude:
-    - 'test/test_fsrs.rb'
+    - 'test/**/test_*.rb'

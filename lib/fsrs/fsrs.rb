@@ -10,6 +10,20 @@ module Fsrs
       @card = card
       @review_log = review_log
     end
+
+    def to_h
+      {
+        card: @card.to_h,
+        review_log: @review_log.to_h
+      }
+    end
+
+    def self.from_h(hash)
+      new(
+        Fsrs::Card.from_h(hash[:card]),
+        Fsrs::ReviewLog.from_h(hash[:review_log])
+      )
+    end
   end
 
   #
@@ -23,6 +37,26 @@ module Fsrs
       @elapsed_days = elapsed_days
       @review = review
       @state = state
+    end
+
+    def to_h
+      {
+        rating: @rating,
+        scheduled_days: @scheduled_days,
+        elapsed_days: @elapsed_days,
+        review: @review,
+        state: @state
+      }
+    end
+
+    def self.from_h(hash)
+      new(
+        hash[:rating],
+        hash[:scheduled_days],
+        hash[:elapsed_days],
+        hash[:review],
+        hash[:state]
+      )
     end
   end
 
@@ -192,6 +226,30 @@ module Fsrs
     def deep_clone
       Marshal.load(Marshal.dump(self))
     end
+
+    def to_h
+      {
+        state: @state, due: @due,
+        stability: @stability, difficulty: @difficulty,
+        elapsed_days: @elapsed_days, scheduled_days: @scheduled_days,
+        reps: @reps, lapses: @lapses,
+        last_review: @last_review
+      }
+    end
+
+    def self.from_h(hash)
+      card = new
+      hash.each do |key, value|
+        if %w[due last_review].include?(key) && value.is_a?(String)
+          # Handle DateTime fields from JSON input
+          card.instance_variable_set("@#{key}", DateTime.parse(value))
+        else
+          # Handle regular fields and DateTime objects from hash input
+          card.instance_variable_set("@#{key}", value)
+        end
+      end
+      card
+    end
   end
 
   #
@@ -243,101 +301,139 @@ module Fsrs
       end
     end
 
-    def schedule_new_state(s, now)
-      init_ds(s)
-      s.again.due = now + 60
-      s.hard.due = now + (5 * 60)
-      s.good.due = now + (10 * 60)
-      easy_interval = next_interval(s.easy.stability)
-      s.easy.scheduled_days = easy_interval
-      s.easy.due = now + easy_interval.days
+    module NewState # rubocop:disable Style/Documentation
+      def schedule_new_state(s, now)
+        init_ds(s)
+        s.again.due = now + 60
+        s.hard.due = now + (5 * 60)
+        s.good.due = now + (10 * 60)
+        easy_interval = next_interval(s.easy.stability)
+        s.easy.scheduled_days = easy_interval
+        s.easy.due = now + easy_interval.days
+      end
+
+      def init_ds(s)
+        s.again.difficulty = init_difficulty(Rating::AGAIN)
+        s.again.stability = init_stability(Rating::AGAIN)
+        s.hard.difficulty = init_difficulty(Rating::HARD)
+        s.hard.stability = init_stability(Rating::HARD)
+        s.good.difficulty = init_difficulty(Rating::GOOD)
+        s.good.stability = init_stability(Rating::GOOD)
+        s.easy.difficulty = init_difficulty(Rating::EASY)
+        s.easy.stability = init_stability(Rating::EASY)
+      end
+
+      def init_stability(r)
+        [self.p.w[r - 1], 0.1].max
+      end
+
+      def init_difficulty(r)
+        (self.p.w[4] - (self.p.w[5] * (r - 3))).clamp(1, 10)
+      end
     end
 
-    def schedule_learning_relearning_state(s, now)
-      hard_interval = 0
-      good_interval = next_interval(s.good.stability)
-      easy_interval = [next_interval(s.easy.stability), good_interval + 1].max
-      s.schedule(now, hard_interval, good_interval, easy_interval)
+    module LearningState # rubocop:disable Style/Documentation
+      def schedule_learning_relearning_state(s, now)
+        hard_interval = 0
+        good_interval = next_interval(s.good.stability)
+        easy_interval = [next_interval(s.easy.stability), good_interval + 1].max
+        s.schedule(now, hard_interval, good_interval, easy_interval)
+      end
     end
 
-    def schedule_review_state(s, card, now)
-      interval = card.elapsed_days
-      last_d = card.difficulty
-      last_s = card.stability
-      retrievability = forgetting_curve(interval, last_s)
-      next_ds(s, last_d, last_s, retrievability)
-      compute_review_state_intervals_and_schedule(s, now)
+    module ReviewState # rubocop:disable Style/Documentation
+      def schedule_review_state(s, card, now)
+        interval = card.elapsed_days
+        last_d = card.difficulty
+        last_s = card.stability
+        retrievability = forgetting_curve(interval, last_s)
+        next_ds(s, last_d, last_s, retrievability)
+        compute_review_state_intervals_and_schedule(s, now)
+      end
+
+      def forgetting_curve(elapsed_days, stability)
+        (1 + (factor * elapsed_days / stability))**decay
+      end
+
+      def compute_review_state_intervals_and_schedule(s, now)
+        hard_interval = next_interval(s.hard.stability)
+        good_interval = next_interval(s.good.stability)
+        hard_interval = [hard_interval, good_interval].min
+        good_interval = [good_interval, hard_interval + 1].max
+        easy_interval = [next_interval(s.easy.stability), good_interval + 1].max
+
+        s.schedule(now, hard_interval, good_interval, easy_interval)
+      end
+
+      def mean_reversion(init, current)
+        (self.p.w[7] * init) + ((1 - self.p.w[7]) * current)
+      end
     end
 
-    def compute_review_state_intervals_and_schedule(s, now)
-      hard_interval = next_interval(s.hard.stability)
-      good_interval = next_interval(s.good.stability)
-      hard_interval = [hard_interval, good_interval].min
-      good_interval = [good_interval, hard_interval + 1].max
-      easy_interval = [next_interval(s.easy.stability), good_interval + 1].max
+    module Common # rubocop:disable Style/Documentation
+      def next_ds(s, last_d, last_s, retrievability)
+        s.again.difficulty = next_difficulty(last_d, Rating::AGAIN)
+        s.again.stability = next_forget_stability(last_d, last_s, retrievability)
+        s.hard.difficulty = next_difficulty(last_d, Rating::HARD)
+        s.hard.stability = next_recall_stability(last_d, last_s, retrievability, Rating::HARD)
+        s.good.difficulty = next_difficulty(last_d, Rating::GOOD)
+        s.good.stability = next_recall_stability(last_d, last_s, retrievability, Rating::GOOD)
+        s.easy.difficulty = next_difficulty(last_d, Rating::EASY)
+        s.easy.stability = next_recall_stability(last_d, last_s, retrievability, Rating::EASY)
+      end
 
-      s.schedule(now, hard_interval, good_interval, easy_interval)
+      def next_difficulty(d, r)
+        next_d = d - (self.p.w[6] * (r - 3))
+        mean_reversion(self.p.w[4], next_d).clamp(1, 10)
+      end
+
+      def next_recall_stability(d, s, r, rating)
+        hard_penalty = rating == Rating::HARD ? self.p.w[15] : 1
+        easy_bonus = rating == Rating::EASY ? self.p.w[16] : 1
+        s * (1 + (Math.exp(self.p.w[8]) * (11 - d) * (s**-self.p.w[9]) *
+            (Math.exp((1 - r) * self.p.w[10]) - 1) * hard_penalty * easy_bonus))
+      end
+
+      def next_forget_stability(d, s, r)
+        self.p.w[11] * (d**-self.p.w[12]) * (((s + 1)**self.p.w[13]) - 1) *
+          Math.exp((1 - r) * self.p.w[14])
+      end
+
+      def next_interval(s)
+        new_interval = s / factor * ((self.p.request_retention**(1 / decay)) - 1)
+        new_interval.round.clamp(1, self.p.maximum_interval)
+      end
     end
 
-    def init_ds(s)
-      s.again.difficulty = init_difficulty(Rating::AGAIN)
-      s.again.stability = init_stability(Rating::AGAIN)
-      s.hard.difficulty = init_difficulty(Rating::HARD)
-      s.hard.stability = init_stability(Rating::HARD)
-      s.good.difficulty = init_difficulty(Rating::GOOD)
-      s.good.stability = init_stability(Rating::GOOD)
-      s.easy.difficulty = init_difficulty(Rating::EASY)
-      s.easy.stability = init_stability(Rating::EASY)
+    module Serialization # rubocop:disable Style/Documentation
+      def to_h
+        {
+          p: @p.to_h,
+          decay: @decay,
+          factor: @factor
+        }
+      end
+
+      module ClassMethods # rubocop:disable Style/Documentation
+        def from_h(hash)
+          scheduler = new
+          scheduler.p = Parameters.from_h(hash[:p])
+          scheduler.decay = hash[:decay]
+          scheduler.factor = hash[:factor]
+          scheduler
+        end
+      end
+
+      def self.included(base)
+        base.extend(ClassMethods)
+      end
     end
 
-    def next_ds(s, last_d, last_s, retrievability)
-      s.again.difficulty = next_difficulty(last_d, Rating::AGAIN)
-      s.again.stability = next_forget_stability(last_d, last_s, retrievability)
-      s.hard.difficulty = next_difficulty(last_d, Rating::HARD)
-      s.hard.stability = next_recall_stability(last_d, last_s, retrievability, Rating::HARD)
-      s.good.difficulty = next_difficulty(last_d, Rating::GOOD)
-      s.good.stability = next_recall_stability(last_d, last_s, retrievability, Rating::GOOD)
-      s.easy.difficulty = next_difficulty(last_d, Rating::EASY)
-      s.easy.stability = next_recall_stability(last_d, last_s, retrievability, Rating::EASY)
-    end
-
-    def init_stability(r)
-      [self.p.w[r - 1], 0.1].max
-    end
-
-    def init_difficulty(r)
-      (self.p.w[4] - (self.p.w[5] * (r - 3))).clamp(1, 10)
-    end
-
-    def forgetting_curve(elapsed_days, stability)
-      (1 + (factor * elapsed_days / stability))**decay
-    end
-
-    def next_interval(s)
-      new_interval = s / factor * ((self.p.request_retention**(1 / decay)) - 1)
-      new_interval.round.clamp(1, self.p.maximum_interval)
-    end
-
-    def next_difficulty(d, r)
-      next_d = d - (self.p.w[6] * (r - 3))
-      mean_reversion(self.p.w[4], next_d).clamp(1, 10)
-    end
-
-    def mean_reversion(init, current)
-      (self.p.w[7] * init) + ((1 - self.p.w[7]) * current)
-    end
-
-    def next_recall_stability(d, s, r, rating)
-      hard_penalty = rating == Rating::HARD ? self.p.w[15] : 1
-      easy_bonus = rating == Rating::EASY ? self.p.w[16] : 1
-      s * (1 + (Math.exp(self.p.w[8]) * (11 - d) * (s**-self.p.w[9]) *
-          (Math.exp((1 - r) * self.p.w[10]) - 1) * hard_penalty * easy_bonus))
-    end
-
-    def next_forget_stability(d, s, r)
-      self.p.w[11] * (d**-self.p.w[12]) * (((s + 1)**self.p.w[13]) - 1) *
-        Math.exp((1 - r) * self.p.w[14])
-    end
+    include NewState
+    include LearningState
+    include ReviewState
+    include Common
+    include Serialization
   end
 
   #
@@ -350,6 +446,22 @@ module Fsrs
       @maximum_interval = 36_500
       @w = [0.4, 0.6, 2.4, 5.8, 4.93, 0.94, 0.86, 0.01, 1.49, 0.14, 0.94,
             2.18, 0.05, 0.34, 1.26, 0.29, 2.61]
+    end
+
+    def to_h
+      {
+        request_retention: @request_retention,
+        maximum_interval: @maximum_interval,
+        w: @w
+      }
+    end
+
+    def self.from_h(hash)
+      params = new
+      params.w = hash[:w]
+      params.request_retention = hash[:request_retention]
+      params.maximum_interval = hash[:maximum_interval]
+      params
     end
   end
 end
