@@ -1,5 +1,14 @@
 # frozen_string_literal: true
 
+require "simplecov"
+SimpleCov.external_at_exit = true
+SimpleCov.start do
+  root File.expand_path("..", __dir__)
+
+  add_filter "/test/"
+  enable_coverage :branch
+end
+
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 require "fsrs"
 
