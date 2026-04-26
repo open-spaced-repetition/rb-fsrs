@@ -304,9 +304,9 @@ module Fsrs
     module NewState # rubocop:disable Style/Documentation
       def schedule_new_state(s, now)
         init_ds(s)
-        s.again.due = now + 60
-        s.hard.due = now + (5 * 60)
-        s.good.due = now + (10 * 60)
+        s.again.due = now + 1.minute
+        s.hard.due = now + 5.minutes
+        s.good.due = now + 10.minutes
         easy_interval = next_interval(s.easy.stability)
         s.easy.scheduled_days = easy_interval
         s.easy.due = now + easy_interval.days

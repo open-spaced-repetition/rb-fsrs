@@ -82,4 +82,20 @@ class FSRSTest < Minitest::Test
     # card object's due datetime should be later than its last review
     assert card.due >= card.last_review
   end
+
+  def test_new_card_learning_steps_are_scheduled_in_minutes
+    scheduler = Fsrs::Scheduler.new
+    now = DateTime.parse("2022-11-29 12:30 +00:00")
+    scheduling_cards = scheduler.repeat(Fsrs::Card.new, now)
+
+    assert_in_delta 60, seconds_between(now, scheduling_cards[Fsrs::Rating::AGAIN].card.due), 0.001
+    assert_in_delta 5.minutes, seconds_between(now, scheduling_cards[Fsrs::Rating::HARD].card.due), 0.001
+    assert_in_delta 10.minutes, seconds_between(now, scheduling_cards[Fsrs::Rating::GOOD].card.due), 0.001
+  end
+
+  private
+
+  def seconds_between(start_time, end_time)
+    (end_time - start_time) * 24 * 60 * 60
+  end
 end
