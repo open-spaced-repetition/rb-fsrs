@@ -10,11 +10,18 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    name: Ruby ${{ matrix.ruby }}
+    name: Ruby ${{ matrix.ruby }} / ${{ matrix.gemfile }}
     strategy:
       matrix:
         ruby:
           - '3.3.1'
+          - '4.0'
+        gemfile:
+          - Gemfile
+          - gemfiles/activesupport_7.gemfile
+          - gemfiles/activesupport_8.gemfile
+    env:
+      BUNDLE_GEMFILE: ${{ matrix.gemfile }}
 
     steps:
     - uses: actions/checkout@v4
